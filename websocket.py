@@ -115,10 +115,7 @@ class Websocket:
     ) -> abc.AsyncGenerator[aiohttp.ClientWebSocketResponse, None]:
         session = await self._twitch.get_session()
         backoff = ExponentialBackoff(**kwargs)
-        if self._twitch.settings.proxy:
-            proxy = self._twitch.settings.proxy
-        else:
-            proxy = None
+        proxy = self._twitch.settings.proxy if self._twitch.settings.proxy else None
         for delay in backoff:
             try:
                 async with session.ws_connect(ws_url, ssl=True, proxy=proxy) as websocket:
@@ -206,9 +203,7 @@ class Websocket:
         self.set_status(refresh_topics=True)
         auth_state = await self._twitch.get_auth()
         current: set[WebsocketTopic] = set(self.topics.values())
-        # handle removed topics
-        removed = self._submitted.difference(current)
-        if removed:
+        if removed := self._submitted.difference(current):
             topics_list = list(map(str, removed))
             ws_logger.debug(f"Websocket[{self._idx}]: Removing topics: {', '.join(topics_list)}")
             await self.send(
@@ -221,9 +216,7 @@ class Websocket:
                 }
             )
             self._submitted.difference_update(removed)
-        # handle added topics
-        added = current.difference(self._submitted)
-        if added:
+        if added := current.difference(self._submitted):
             topics_list = list(map(str, added))
             ws_logger.debug(f"Websocket[{self._idx}]: Adding topics: {', '.join(topics_list)}")
             await self.send(
@@ -287,14 +280,11 @@ class Websocket:
             elif msg_type == "PONG":
                 # move the timestamp to something much later
                 self._max_pong = self._next_ping
-            elif msg_type == "RESPONSE":
-                # no special handling for these (for now)
-                pass
             elif msg_type == "RECONNECT":
                 # We've received a reconnect request
                 ws_logger.warning(f"Websocket[{self._idx}] requested reconnect.")
                 self.request_reconnect()
-            else:
+            elif msg_type != "RESPONSE":
                 ws_logger.warning(f"Websocket[{self._idx}] received unknown payload: {message}")
 
     def add_topics(self, topics_set: set[WebsocketTopic]):
@@ -386,11 +376,10 @@ class WebsocketPool:
         recycled_topics: list[WebsocketTopic] = []
         while True:
             count = sum(len(ws.topics) for ws in self.websockets)
-            if count <= (len(self.websockets) - 1) * WS_TOPICS_LIMIT:
-                ws = self.websockets.pop()
-                recycled_topics.extend(ws.topics.values())
-                ws.stop_nowait(remove=True)
-            else:
+            if count > (len(self.websockets) - 1) * WS_TOPICS_LIMIT:
                 break
+            ws = self.websockets.pop()
+            recycled_topics.extend(ws.topics.values())
+            ws.stop_nowait(remove=True)
         if recycled_topics:
             self.add_topics(recycled_topics)

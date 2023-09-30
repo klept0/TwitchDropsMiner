@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 else:
     # stub it
     class ParamSpec:
-        def __init__(*args, **kwargs):
+        def __init__(self, **kwargs):
             pass
 
 
@@ -113,8 +113,8 @@ def timestamp(string: str) -> datetime:
 
 
 CHARS_ASCII = string.ascii_letters + string.digits
-CHARS_HEX_LOWER = string.digits + "abcdef"
-CHARS_HEX_UPPER = string.digits + "ABCDEF"
+CHARS_HEX_LOWER = f"{string.digits}abcdef"
+CHARS_HEX_UPPER = f"{string.digits}ABCDEF"
 
 
 def create_nonce(chars: str, length: int) -> str:
@@ -206,17 +206,22 @@ def _deserialize(obj: JsonType) -> Any:
 def merge_json(obj: JsonType, template: Mapping[Any, Any]) -> None:
     # NOTE: This modifies object in place
     for k, v in list(obj.items()):
-        if k not in template:
-            del obj[k]
-        elif isinstance(v, dict):
-            if isinstance(template[k], dict):
-                merge_json(v, template[k])
-            else:
-                # object is a dict, template is not: overwrite from template
-                obj[k] = template[k]
-        elif isinstance(template[k], dict):
-            # template is a dict, object is not: overwrite from template
+        if (
+            k in template
+            and isinstance(v, dict)
+            and isinstance(template[k], dict)
+        ):
+            merge_json(v, template[k])
+        elif (
+            k in template
+            and isinstance(v, dict)
+            or k in template
+            and isinstance(template[k], dict)
+        ):
+            # object is a dict, template is not: overwrite from template
             obj[k] = template[k]
+        elif k not in template:
+            del obj[k]
     # ensure the object is not missing any keys
     for k in template.keys():
         if k not in obj:
@@ -277,9 +282,9 @@ class ExponentialBackoff:
         if base <= 1:
             raise ValueError("Base has to be greater than 1")
         self.steps: int = 0
-        self.base: float = float(base)
-        self.shift: float = float(shift)
-        self.maximum: float = float(maximum)
+        self.base: float = base
+        self.shift: float = shift
+        self.maximum: float = maximum
         self.variance_min: float
         self.variance_max: float
         if isinstance(variance, tuple):
@@ -365,9 +370,7 @@ class AwaitableValue(Generic[_T]):
         return self._event.wait()
 
     def get_with_default(self, default: _D) -> _T | _D:
-        if self._event.is_set():
-            return self._value
-        return default
+        return self._value if self._event.is_set() else default
 
     async def get(self) -> _T:
         await self._event.wait()

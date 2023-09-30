@@ -419,8 +419,7 @@ class Translator:
             json_save(default_langpath, default_translation)
         self._translation["language_name"] = DEFAULT_LANG
         # load available translation names
-        for filepath in LANG_PATH.glob("*.json"):
-            self._langs.append(filepath.stem)
+        self._langs.extend(filepath.stem for filepath in LANG_PATH.glob("*.json"))
         self._langs.sort()
         if DEFAULT_LANG in self._langs:
             self._langs.remove(DEFAULT_LANG)

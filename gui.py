@@ -125,10 +125,7 @@ class PlaceholderEntry(ttk.Entry):
         self, options: dict[str, object], name: str, attr: str, *, remove: bool = False
     ) -> None:
         if name in options:
-            if remove:
-                value = options.pop(name)
-            else:
-                value = options[name]
+            value = options.pop(name) if remove else options[name]
             setattr(self, attr, value)
 
     def configure(self, *args: Any, **kwargs: Any) -> Any:
@@ -149,9 +146,7 @@ class PlaceholderEntry(ttk.Entry):
         self.configure(*args, **kwargs)
 
     def get(self) -> str:
-        if self._ph:
-            return ''
-        return super().get()
+        return '' if self._ph else super().get()
 
     def insert(self, index: tk._EntryIndex, content: str) -> None:
         # when inserting into the entry externally, disable the placeholder flag
@@ -278,11 +273,7 @@ class MouseOverLabel(ttk.Label):
             options.update(args[0])
         if kwargs:
             options.update(kwargs)
-        applicable_options: set[str] = set((
-            "text",
-            "reverse",
-            "alt_text",
-        ))
+        applicable_options: set[str] = {"text", "reverse", "alt_text"}
         if applicable_options.intersection(options.keys()):
             # we need to pop some options, because they can't be passed down to the label,
             # as that will result in an error later down the line
@@ -355,7 +346,7 @@ class SelectMenu(tk.Menubutton, Generic[_T]):
         background: str = "white",
         **kwargs: Any,
     ):
-        width = max((len(k) for k in options.keys()), default=20)
+        width = max((len(k) for k in options), default=20)
         super().__init__(
             master, *args, background=background, relief=relief, width=width, **kwargs
         )
@@ -363,7 +354,7 @@ class SelectMenu(tk.Menubutton, Generic[_T]):
         self._command = command
         self.menu = tk.Menu(self, tearoff=tearoff)
         self.config(menu=self.menu)
-        for name in options.keys():
+        for name in options:
             self.menu.add_command(label=name, command=partial(self._select, name))
         if default is not None and default in self._menu_options:
             self.config(text=default)
@@ -553,10 +544,7 @@ class LoginForm:
         webopen("https://www.twitch.tv/activate")
 
     def update(self, status: str, user_id: int | None):
-        if user_id is not None:
-            user_str = str(user_id)
-        else:
-            user_str = "-"
+        user_str = str(user_id) if user_id is not None else "-"
         self._var.set(f"{status}\n{user_str}")
 
 
@@ -889,8 +877,7 @@ class ChannelList:
             return "break"
 
     def _selected(self, event):
-        selection = self._table.selection()
-        if selection:
+        if selection := self._table.selection():
             self._buttons["switch"].config(state="normal")
         else:
             self._buttons["switch"].config(state="disabled")
@@ -961,9 +948,7 @@ class ChannelList:
         if not self._channel_map:
             return None
         selection = self._table.selection()
-        if not selection:
-            return None
-        return self._channel_map[selection[0]]
+        return None if not selection else self._channel_map[selection[0]]
 
     def clear_selection(self):
         self._table.selection_set('')
@@ -992,14 +977,8 @@ class ChannelList:
         game = str(channel.game or '')
         # drops
         drops = "✔" if channel.drops_enabled else "❌"
-        # viewers
-        viewers = ''
-        if channel.viewers is not None:
-            viewers = str(channel.viewers)
-        # points
-        points = ''
-        if channel.points is not None:
-            points = str(channel.points)
+        viewers = str(channel.viewers) if channel.viewers is not None else ''
+        points = str(channel.points) if channel.points is not None else ''
         if iid in self._channel_map:
             self._set(iid, "game", game)
             self._set(iid, "drops", drops)
@@ -1273,10 +1252,7 @@ class InventoryOverview:
     def _on_mousewheel(self, event: tk.Event[tk.Misc]):
         delta = -1 if event.delta > 0 else 1
         state: int = event.state if isinstance(event.state, int) else 0
-        if state & 1:
-            scroll = self._canvas.xview_scroll
-        else:
-            scroll = self._canvas.yview_scroll
+        scroll = self._canvas.xview_scroll if state & 1 else self._canvas.yview_scroll
         scroll(delta, "units")
 
     async def add_campaign(self, campaign: DropsCampaign) -> None:
@@ -1326,9 +1302,7 @@ class InventoryOverview:
             padding=0,
             **link_kwargs,
         ).grid(column=1, row=3, sticky="w", padx=4)
-        # ACL channels
-        acl = campaign.allowed_channels
-        if acl:
+        if acl := campaign.allowed_channels:
             if len(acl) <= 5:
                 allowed_text: str = '\n'.join(ch.name for ch in acl)
             else:
@@ -1642,16 +1616,7 @@ class SettingsPanel:
         tray = bool(self._vars["tray"].get())
         self._settings.autostart = enabled
         self._settings.autostart_tray = tray
-        if sys.platform == "win32":
-            if enabled:
-                # NOTE: we need double quotes in case the path contains spaces
-                autostart_path = self._get_autostart_path(tray)
-                with RegistryKey(self.AUTOSTART_KEY) as key:
-                    key.set(self.AUTOSTART_NAME, ValueType.REG_SZ, autostart_path)
-            else:
-                with RegistryKey(self.AUTOSTART_KEY) as key:
-                    key.delete(self.AUTOSTART_NAME, silent=True)
-        elif sys.platform == "linux":
+        if sys.platform == "linux":
             autostart_folder: Path = Path("~/.config/autostart").expanduser()
             if (config_home := os.environ.get("XDG_CONFIG_HOME")) is not None:
                 config_autostart: Path = Path(config_home, "autostart").expanduser()
@@ -1673,6 +1638,16 @@ class SettingsPanel:
                     file.write(file_contents)
             else:
                 autostart_file.unlink(missing_ok=True)
+
+        elif sys.platform == "win32":
+            if enabled:
+                # NOTE: we need double quotes in case the path contains spaces
+                autostart_path = self._get_autostart_path(tray)
+                with RegistryKey(self.AUTOSTART_KEY) as key:
+                    key.set(self.AUTOSTART_NAME, ValueType.REG_SZ, autostart_path)
+            else:
+                with RegistryKey(self.AUTOSTART_KEY) as key:
+                    key.delete(self.AUTOSTART_NAME, silent=True)
 
     def set_games(self, games: abc.Iterable[Game]) -> None:
         games_list = sorted(map(str, games))
@@ -1708,9 +1683,7 @@ class SettingsPanel:
 
     def _priority_idx(self) -> int | None:
         selection: tuple[int, ...] = self._priority_list.curselection()
-        if not selection:
-            return None
-        return selection[0]
+        return None if not selection else selection[0]
 
     def priority_move(self, up: bool) -> None:
         idx: int | None = self._priority_idx()
@@ -2139,9 +2112,7 @@ if __name__ == "__main__":
 
     class StrNamespace(SimpleNamespace):
         def __str__(self):
-            if hasattr(self, "_str__"):
-                return self._str__(self)
-            return super().__str__()
+            return self._str__(self) if hasattr(self, "_str__") else super().__str__()
 
     class HashNamespace(SimpleNamespace):
         __hash__ = object.__hash__  # type: ignore
@@ -2166,10 +2137,7 @@ if __name__ == "__main__":
             pending = True
         else:
             pending = False
-        if game is not None:
-            game_obj: StrNamespace | None = create_game(0, game)
-        else:
-            game_obj = None
+        game_obj = create_game(0, game) if game is not None else None
         global iid
         return SimpleNamespace(
             name=name,
