@@ -55,7 +55,7 @@ class Stream:
 
     @classmethod
     def from_directory(cls, channel: Channel, data: JsonType) -> Stream:
-        self = cls(
+        return cls(
             channel,
             id=data["id"],
             game=data["game"],  # has to be there since we searched with it
@@ -63,9 +63,6 @@ class Stream:
             title=data["title"],
             tags=[],
         )
-        # HACK: we assume this is always the case for directory streams, since we search by the tag
-        # self.drops_enabled = True
-        return self
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, self.__class__):
@@ -145,9 +142,7 @@ class Channel:
 
     @property
     def name(self) -> str:
-        if self._display_name is not None:
-            return self._display_name
-        return self._login
+        return self._display_name if self._display_name is not None else self._login
 
     @property
     def url(self) -> URLType:
@@ -185,15 +180,11 @@ class Channel:
 
     @property
     def game(self) -> Game | None:
-        if self._stream is not None:
-            return self._stream.game
-        return None
+        return self._stream.game if self._stream is not None else None
 
     @property
     def viewers(self) -> int | None:
-        if self._stream is not None:
-            return self._stream.viewers
-        return None
+        return self._stream.viewers if self._stream is not None else None
 
     @viewers.setter
     def viewers(self, value: int):
@@ -202,9 +193,7 @@ class Channel:
 
     @property
     def drops_enabled(self) -> bool:
-        if self._stream is not None:
-            return self._stream.drops_enabled
-        return False
+        return self._stream.drops_enabled if self._stream is not None else False
 
     def display(self, *, add: bool = False):
         self._gui_channels.display(self, add=add)
@@ -222,9 +211,6 @@ class Channel:
 
         For mobile view, spade_url is available immediately from the page, skipping step #2.
         """
-        SETTINGS_PATTERN: str = (
-            r'src="(https://static\.twitchcdn\.net/config/settings\.[0-9a-f]{32}\.js)"'
-        )
         SPADE_PATTERN: str = (
             r'"spade_?url": ?"(https://video-edge-[.\w\-/]+\.ts(?:\?allow_stream=true)?)"'
         )
@@ -232,6 +218,9 @@ class Channel:
             streamer_html: str = await response.text(encoding="utf8")
         match = re.search(SPADE_PATTERN, streamer_html, re.I)
         if not match:
+            SETTINGS_PATTERN: str = (
+                r'src="(https://static\.twitchcdn\.net/config/settings\.[0-9a-f]{32}\.js)"'
+            )
             match = re.search(SETTINGS_PATTERN, streamer_html, re.I)
             if not match:
                 raise MinerException("Error while spade_url extraction: step #1")
@@ -239,8 +228,8 @@ class Channel:
             async with self._twitch.request("GET", streamer_settings) as response:
                 settings_js: str = await response.text(encoding="utf8")
             match = re.search(SPADE_PATTERN, settings_js, re.I)
-            if not match:
-                raise MinerException("Error while spade_url extraction: step #2")
+        if not match:
+            raise MinerException("Error while spade_url extraction: step #2")
         return URLType(match.group(1))
 
     async def get_stream(self) -> Stream | None:
@@ -327,10 +316,9 @@ class Channel:
         )
         channel_data: JsonType = response["data"]["community"]["channel"]
         self.points = channel_data["self"]["communityPoints"]["balance"]
-        claim_available: JsonType = (
-            channel_data["self"]["communityPoints"]["availableClaim"]
-        )
-        if claim_available:
+        if claim_available := channel_data["self"]["communityPoints"][
+            "availableClaim"
+        ]:
             await self._twitch.claim_points(channel_data["id"], claim_available["id"])
             logger.info("Claimed bonus points")
         else:

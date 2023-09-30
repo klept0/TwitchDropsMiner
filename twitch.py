@@ -413,7 +413,7 @@ class _AuthState:
                     logger.info("1000: CAPTCHA is required")
                     use_chrome = True
                     break
-                elif error_code in (2004, 3001):
+                elif error_code in {2004, 3001}:
                     logger.info("3001: Login failed due to incorrect username or password")
                     gui_print(_("login", "incorrect_login_pass"))
                     if error_code == 2004:
@@ -421,10 +421,7 @@ class _AuthState:
                         login_form.clear(login=True)
                     login_form.clear(password=True)
                     continue
-                elif error_code in (
-                    3012,  # Invalid authy token
-                    3023,  # Invalid email code
-                ):
+                elif error_code in {3012, 3023}:
                     logger.info("3012/23: Login failed due to incorrect 2FA code")
                     if error_code == 3023:
                         token_kind = "email"
@@ -434,10 +431,7 @@ class _AuthState:
                         gui_print(_("login", "incorrect_twofa_code"))
                     login_form.clear(token=True)
                     continue
-                elif error_code in (
-                    3011,  # Authy token needed
-                    3022,  # Email code needed
-                ):
+                elif error_code in {3011, 3022}:
                     # 2FA handling
                     logger.info("3011/22: 2FA token required")
                     # user didn't provide a token, so ask them for it
@@ -549,20 +543,20 @@ class _AuthState:
                     self.access_token = cookie["auth-token"].value
                 # validate the auth token, by obtaining user_id
                 async with self._twitch.request(
-                    "GET",
-                    "https://id.twitch.tv/oauth2/validate",
-                    headers={"Authorization": f"OAuth {self.access_token}"}
-                ) as response:
+                                "GET",
+                                "https://id.twitch.tv/oauth2/validate",
+                                headers={"Authorization": f"OAuth {self.access_token}"}
+                            ) as response:
                     status = response.status
-                    if status == 401:
+                    if status == 200:
+                        validate_response = await response.json()
+                        break
+                    elif status == 401:
                         # the access token we have is invalid - clear the cookie and reauth
                         logger.info("Restored session is invalid")
                         assert CLIENT_URL.host is not None
                         jar.clear_domain(CLIENT_URL.host)
                         continue
-                    elif status == 200:
-                        validate_response = await response.json()
-                        break
             else:
                 raise RuntimeError("Login verification failure")
             if validate_response["client_id"] != CLIENT_ID:
@@ -755,9 +749,7 @@ class Twitch:
 
     @staticmethod
     def _viewers_key(channel: Channel) -> int:
-        if (viewers := channel.viewers) is not None:
-            return viewers
-        return -1
+        return viewers if (viewers := channel.viewers) is not None else -1
 
     async def run(self):
         while True:
@@ -805,7 +797,7 @@ class Twitch:
                 # ensure the websocket is running
                 await self.websocket.start()
                 await self.fetch_inventory()
-                self.gui.set_games(set(campaign.game for campaign in self.inventory))
+                self.gui.set_games({campaign.game for campaign in self.inventory})
                 # Save state on every inventory fetch
                 self.save()
                 self.change_state(State.GAMES_UPDATE)
@@ -861,11 +853,15 @@ class Twitch:
                 if to_remove_channels:
                     to_remove_topics: list[str] = []
                     for channel in to_remove_channels:
-                        to_remove_topics.append(
-                            WebsocketTopic.as_str("Channel", "StreamState", channel.id)
-                        )
-                        to_remove_topics.append(
-                            WebsocketTopic.as_str("Channel", "StreamUpdate", channel.id)
+                        to_remove_topics.extend(
+                            (
+                                WebsocketTopic.as_str(
+                                    "Channel", "StreamState", channel.id
+                                ),
+                                WebsocketTopic.as_str(
+                                    "Channel", "StreamUpdate", channel.id
+                                ),
+                            )
                         )
                     self.websocket.remove_topics(to_remove_topics)
                     for channel in to_remove_channels:
@@ -929,11 +925,15 @@ class Twitch:
                     # just make sure to unsubscribe from their topics
                     to_remove_topics = []
                     for channel in to_remove_channels:
-                        to_remove_topics.append(
-                            WebsocketTopic.as_str("Channel", "StreamState", channel.id)
-                        )
-                        to_remove_topics.append(
-                            WebsocketTopic.as_str("Channel", "StreamUpdate", channel.id)
+                        to_remove_topics.extend(
+                            (
+                                WebsocketTopic.as_str(
+                                    "Channel", "StreamState", channel.id
+                                ),
+                                WebsocketTopic.as_str(
+                                    "Channel", "StreamUpdate", channel.id
+                                ),
+                            )
                         )
                     self.websocket.remove_topics(to_remove_topics)
                     del to_remove_channels, to_remove_topics
@@ -944,14 +944,20 @@ class Twitch:
                 # subscribe to these channel's state updates
                 to_add_topics: list[WebsocketTopic] = []
                 for channel_id in channels:
-                    to_add_topics.append(
-                        WebsocketTopic(
-                            "Channel", "StreamState", channel_id, self.process_stream_state
-                        )
-                    )
-                    to_add_topics.append(
-                        WebsocketTopic(
-                            "Channel", "StreamUpdate", channel_id, self.process_stream_update
+                    to_add_topics.extend(
+                        (
+                            WebsocketTopic(
+                                "Channel",
+                                "StreamState",
+                                channel_id,
+                                self.process_stream_state,
+                            ),
+                            WebsocketTopic(
+                                "Channel",
+                                "StreamUpdate",
+                                channel_id,
+                                self.process_stream_update,
+                            ),
                         )
                     )
                 self.websocket.add_topics(to_add_topics)
@@ -1147,10 +1153,8 @@ class Twitch:
             # ensure that we don't have unclaimed points bonus
             watching_channel = self.watching_channel.get_with_default(None)
             if watching_channel is not None:
-                try:
+                with suppress(Exception):
                     await watching_channel.claim_bonus()
-                except Exception:
-                    pass  # we intentionally silently skip anything else
         # this triggers this task restart every (up to) 60 minutes
         logger.log(CALL, "Maintenance task requests a reload")
         self.change_state(State.INVENTORY_FETCH)
@@ -1169,11 +1173,10 @@ class Twitch:
             or (game := channel.game) is None or game not in self.wanted_games
         ):
             return False
-        # check if we can progress any campaign for the played game
-        for campaign in self.inventory:
-            if campaign.game == game and campaign.can_earn(channel):
-                return True
-        return False
+        return any(
+            campaign.game == game and campaign.can_earn(channel)
+            for campaign in self.inventory
+        )
 
     def should_switch(self, channel: Channel) -> bool:
         """
@@ -1216,23 +1219,23 @@ class Twitch:
         if channel is None:
             logger.error(f"Stream state change for a non-existing channel: {channel_id}")
             return
-        if msg_type == "viewcount":
-            if not channel.online:
-                # if it's not online for some reason, set it so
-                channel.check_online()
-            else:
-                viewers = message["viewers"]
-                channel.viewers = viewers
-                channel.display()
-                # logger.debug(f"{channel.name} viewers: {viewers}")
+        if (
+            msg_type == "viewcount"
+            and not channel.online
+            or msg_type != "viewcount"
+            and msg_type != "stream-down"
+            and msg_type == "stream-up"
+        ):
+            # if it's not online for some reason, set it so
+            channel.check_online()
+        elif msg_type == "viewcount":
+            viewers = message["viewers"]
+            channel.viewers = viewers
+            channel.display()
+            # logger.debug(f"{channel.name} viewers: {viewers}")
         elif msg_type == "stream-down":
             channel.set_offline()
-        elif msg_type == "stream-up":
-            channel.check_online()
-        elif msg_type == "commercial":
-            # skip these
-            pass
-        else:
+        elif msg_type != "commercial":
             logger.warning(f"Unknown stream state: {msg_type}")
 
     @task_wrapper
@@ -1272,19 +1275,17 @@ class Twitch:
         NOTE: 'stream_before' gets dealocated once this function finishes.
         """
         if stream_before is None:
-            if stream_after is not None:
-                # Channel going ONLINE
-                if (
+            if stream_after is None:
+                # Channel was OFFLINE and stays that way
+                logger.log(CALL, f"{channel.name} stays OFFLINE")
+            elif (
                     self.can_watch(channel)  # we can watch the channel
                     and self.should_switch(channel)  # and we should!
                 ):
-                    self.print(_("status", "goes_online").format(channel=channel.name))
-                    self.watch(channel)
-                else:
-                    logger.info(f"{channel.name} goes ONLINE")
+                self.print(_("status", "goes_online").format(channel=channel.name))
+                self.watch(channel)
             else:
-                # Channel was OFFLINE and stays that way
-                logger.log(CALL, f"{channel.name} stays OFFLINE")
+                logger.info(f"{channel.name} goes ONLINE")
         else:
             watching_channel = self.watching_channel.get_with_default(None)
             if (
@@ -1352,7 +1353,7 @@ class Twitch:
             # by re-sending the watch payload. We can test for it by fetching the current drop
             # via GQL, and then comparing drop IDs.
             await asyncio.sleep(4)
-            for attempt in range(8):
+            for _ in range(8):
                 context = await self.gql_request(GQL_OPERATIONS["CurrentDrop"])
                 drop_data: JsonType | None = (
                     context["data"]["currentUser"]["dropCurrentSession"]
@@ -1436,7 +1437,12 @@ class Twitch:
         #     }
         # }
         msg_type = message["type"]
-        if msg_type == "points-earned":
+        if msg_type == "claim-available":
+            claim_data = message["data"]["claim"]
+            points = claim_data["point_gain"]["total_points"]
+            await self.claim_points(claim_data["channel_id"], claim_data["id"])
+            self.print(_("status", "claimed_points").format(points=points))
+        elif msg_type == "points-earned":
             data: JsonType = message["data"]
             channel: Channel | None = self.channels.get(int(data["channel_id"]))
             points: int = data["point_gain"]["total_points"]
@@ -1445,11 +1451,6 @@ class Twitch:
                 channel.points = balance
                 channel.display()
             self.print(_("status", "earned_points").format(points=f"{points:3}", balance=balance))
-        elif msg_type == "claim-available":
-            claim_data = message["data"]["claim"]
-            points = claim_data["point_gain"]["total_points"]
-            await self.claim_points(claim_data["channel_id"], claim_data["id"])
-            self.print(_("status", "claimed_points").format(points=points))
 
     async def get_auth(self) -> _AuthState:
         await self._auth_state.validate()
@@ -1563,11 +1564,7 @@ class Twitch:
                 vs = secondary_data[key]
                 if not isinstance(vp, type(vs)) or not isinstance(vs, type(vp)):
                     raise MinerException("Inconsistent merge data")
-                if isinstance(vp, dict):  # both are dicts
-                    merged[key] = self._merge_data(vp, vs)
-                else:
-                    # use primary value
-                    merged[key] = vp
+                merged[key] = self._merge_data(vp, vs) if isinstance(vp, dict) else vp
             elif in_primary:
                 merged[key] = primary_data[key]
             else:  # in campaigns only
